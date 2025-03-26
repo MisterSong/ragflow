@@ -814,7 +814,12 @@ class OpenAI_APICV(GptV4):
             raise ValueError("url cannot be None")
         if base_url.split("/")[-1] != "v1":
             base_url = os.path.join(base_url, "v1")
-        self.client = OpenAI(api_key=key, base_url=base_url)
+        # 设置授权头，将API密钥直接转换为Bearer token形式
+        headers = {
+            "Authorization": f"Bearer {key}"
+        }
+        # 创建OpenAI客户端，使用空API密钥和自定义headers
+        self.client = OpenAI(api_key="", base_url=base_url, default_headers=headers)
         self.model_name = model_name.split("___")[0]
         self.lang = lang
 
