@@ -1062,7 +1062,7 @@ class OpenAI_APIChat(Base):
         model_name = model_name.split("___")[0]
         timeout = int(os.environ.get('LM_TIMEOUT_SECONDS', 600))
         headers = {
-            # "Authorization": f"Bearer {key}"
+            "Authorization": f"Bearer {key}"
         }
         self.client = OpenAI(api_key="", base_url=base_url, timeout=timeout, default_headers=headers)
         self.model_name = model_name
