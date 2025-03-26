@@ -1064,6 +1064,8 @@ class OpenAI_APIChat(Base):
         headers = {
             "Authorization": f"Bearer {key}"
         }
+        # 调用父类的 __init__ 方法以初始化 max_retries 和 base_delay 属性
+        super().__init__(key, model_name, base_url)
         self.client = OpenAI(api_key="", base_url=base_url, timeout=timeout, default_headers=headers)
         self.model_name = model_name
 

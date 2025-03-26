@@ -623,14 +623,51 @@ class LmStudioEmbed(LocalAIEmbed):
         self.model_name = model_name
 
 
-class OpenAI_APIEmbed(OpenAIEmbed):
-    def __init__(self, key, model_name, base_url):
+class OpenAI_APIEmbed(Base):
+    def __init__(self, key, model_name="LongCat-8B-128K-Chat",
+                 base_url="https://aigc.sankuai.com/v1/openai/native/embeddings"):
         if not base_url:
-            raise ValueError("url cannot be None")
-        if base_url.split("/")[-1] != "v1":
-            base_url = os.path.join(base_url, "v1")
-        self.client = OpenAI(api_key=key, base_url=base_url)
-        self.model_name = model_name.split("___")[0]
+            base_url = "https://aigc.sankuai.com/v1/openai/native/embeddings"
+        self.api_key = key
+        self.base_url = base_url
+        self.model_name = model_name
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+    def encode(self, texts: list):
+        batch_size = 16
+        texts = [truncate(t, 8191) for t in texts]
+        ress = []
+        token_count = 0
+        for i in range(0, len(texts), batch_size):
+            payload = {
+                "model": self.model_name,
+                "input": texts[i:i + batch_size],
+                "encoding_format": "float"
+            }
+            response = requests.post(self.base_url, headers=self.headers, json=payload)
+            if response.status_code != 200:
+                raise Exception(f"美团嵌入服务调用失败: {response.status_code} - {response.text}")
+
+            res = response.json()
+            ress.extend([d["embedding"] for d in res["data"]])
+            token_count += self.total_token_count(res)
+        return np.array(ress), token_count
+
+    def encode_queries(self, text):
+        payload = {
+            "model": self.model_name,
+            "input": [truncate(text, 8191)],
+            "encoding_format": "float"
+        }
+        response = requests.post(self.base_url, headers=self.headers, json=payload)
+        if response.status_code != 200:
+            raise Exception(f"美团嵌入服务调用失败: {response.status_code} - {response.text}")
+
+        res = response.json()
+        return np.array(res["data"][0]["embedding"]), self.total_token_count(res)
 
 
 class CoHereEmbed(Base):
