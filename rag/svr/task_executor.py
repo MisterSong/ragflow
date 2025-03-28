@@ -404,13 +404,32 @@ async def embedding(docs, mdl, parser_config=None, callback=None):
 
     cnts_ = np.array([])
     for i in range(0, len(cnts), batch_size):
-        vts, c = await trio.to_thread.run_sync(lambda: mdl.encode([truncate(c, mdl.max_length-10) for c in cnts[i: i + batch_size]]))
-        if len(cnts_) == 0:
-            cnts_ = vts
-        else:
-            cnts_ = np.concatenate((cnts_, vts), axis=0)
-        tk_count += c
-        callback(prog=0.7 + 0.2 * (i + 1) / len(cnts), msg="")
+        max_retries = 3
+        retry_delay = 2
+        retry_count = 0
+        while True:
+            try:
+                vts, c = await trio.to_thread.run_sync(lambda: mdl.encode([truncate(c, mdl.max_length-10) for c in cnts[i: i + batch_size]]))
+                if len(cnts_) == 0:
+                    cnts_ = vts
+                else:
+                    cnts_ = np.concatenate((cnts_, vts), axis=0)
+                tk_count += c
+                callback(prog=0.7 + 0.2 * (i + 1) / len(cnts), msg="")
+                break
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logging.error(f"Failed to generate embeddings after {max_retries} retries: {str(e)}")
+                    raise
+                
+                if "IncompleteRead" in str(e) or "Connection" in str(e) or "ChunkedEncodingError" in str(e):
+                    wait_time = retry_delay * (2 ** (retry_count - 1))
+                    logging.warning(f"Network error when generating embeddings: {str(e)}. Retrying ({retry_count}/{max_retries}) after {wait_time}s...")
+                    callback(prog=0.7 + 0.2 * i / len(cnts), msg=f"Embedding retry {retry_count}/{max_retries}...")
+                    await trio.sleep(wait_time)
+                else:
+                    raise
     cnts = cnts_
 
     title_w = float(parser_config.get("filename_embd_weight", 0.1))

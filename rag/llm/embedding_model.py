@@ -26,6 +26,7 @@ import dashscope
 from openai import OpenAI
 import numpy as np
 import asyncio
+import time
 
 from api import settings
 from api.utils.file_utils import get_home_cache_dir
@@ -635,6 +636,7 @@ class OpenAI_APIEmbed(Base):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
         }
+        self.max_length = 8000  # OpenAI API limit
 
     def encode(self, texts: list):
         batch_size = 16
@@ -642,32 +644,70 @@ class OpenAI_APIEmbed(Base):
         ress = []
         token_count = 0
         for i in range(0, len(texts), batch_size):
-            payload = {
-                "model": self.model_name,
-                "input": texts[i:i + batch_size],
-                "encoding_format": "float"
-            }
-            response = requests.post(self.base_url, headers=self.headers, json=payload)
-            if response.status_code != 200:
-                raise Exception(f"美团嵌入服务调用失败: {response.status_code} - {response.text}")
+            max_retries = 3
+            retry_count = 0
+            retry_delay = 2
+            while True:
+                try:
+                    payload = {
+                        "model": self.model_name,
+                        "input": texts[i:i + batch_size],
+                        "encoding_format": "float"
+                    }
+                    response = requests.post(self.base_url, headers=self.headers, json=payload, timeout=60)
+                    if response.status_code != 200:
+                        raise Exception(f"美团嵌入服务调用失败: {response.status_code} - {response.text}")
 
-            res = response.json()
-            ress.extend([d["embedding"] for d in res["data"]])
-            token_count += self.total_token_count(res)
+                    res = response.json()
+                    ress.extend([d["embedding"] for d in res["data"]])
+                    token_count += self.total_token_count(res)
+                    break  # 成功后退出循环
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        logging.error(f"Failed to generate embeddings after {max_retries} retries: {str(e)}")
+                        raise  # 达到最大重试次数后，重新抛出异常
+                    
+                    # 检查是否为网络连接错误
+                    if "IncompleteRead" in str(e) or "Connection" in str(e) or "ChunkedEncodingError" in str(e) or "timeout" in str(e).lower():
+                        wait_time = retry_delay * (2 ** (retry_count - 1))  # 指数退避
+                        logging.warning(f"Network error when calling embedding API: {str(e)}. Retrying ({retry_count}/{max_retries}) after {wait_time}s...")
+                        time.sleep(wait_time)  # 等待一段时间后重试
+                    else:
+                        # 对于非网络错误，直接抛出
+                        raise
         return np.array(ress), token_count
 
     def encode_queries(self, text):
-        payload = {
-            "model": self.model_name,
-            "input": [truncate(text, 8191)],
-            "encoding_format": "float"
-        }
-        response = requests.post(self.base_url, headers=self.headers, json=payload)
-        if response.status_code != 200:
-            raise Exception(f"美团嵌入服务调用失败: {response.status_code} - {response.text}")
+        max_retries = 3
+        retry_count = 0
+        retry_delay = 2
+        
+        while True:
+            try:
+                payload = {
+                    "model": self.model_name,
+                    "input": [truncate(text, 8191)],
+                    "encoding_format": "float"
+                }
+                response = requests.post(self.base_url, headers=self.headers, json=payload, timeout=60)
+                if response.status_code != 200:
+                    raise Exception(f"美团嵌入服务调用失败: {response.status_code} - {response.text}")
 
-        res = response.json()
-        return np.array(res["data"][0]["embedding"]), self.total_token_count(res)
+                res = response.json()
+                return np.array(res["data"][0]["embedding"]), self.total_token_count(res)
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logging.error(f"Failed to generate query embedding after {max_retries} retries: {str(e)}")
+                    raise
+                
+                if "IncompleteRead" in str(e) or "Connection" in str(e) or "ChunkedEncodingError" in str(e) or "timeout" in str(e).lower():
+                    wait_time = retry_delay * (2 ** (retry_count - 1))
+                    logging.warning(f"Network error when calling embedding API for query: {str(e)}. Retrying ({retry_count}/{max_retries}) after {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    raise
 
 
 class CoHereEmbed(Base):
