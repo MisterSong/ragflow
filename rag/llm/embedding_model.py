@@ -637,8 +637,8 @@ class OpenAI_APIEmbed(Base):
         }
 
     def encode(self, texts: list):
-        batch_size = 16
-        texts = [truncate(t, 8191) for t in texts]
+        batch_size = 2
+        texts = [truncate(t, 8000) for t in texts]
         ress = []
         token_count = 0
         for i in range(0, len(texts), batch_size):
@@ -659,7 +659,7 @@ class OpenAI_APIEmbed(Base):
     def encode_queries(self, text):
         payload = {
             "model": self.model_name,
-            "input": [truncate(text, 8191)],
+            "input": [truncate(text, 8000)],
             "encoding_format": "float"
         }
         response = requests.post(self.base_url, headers=self.headers, json=payload)
